@@ -9,6 +9,6 @@ package possystem;
  *
  * @author Alex
  */
-public class Login {
+public class Login extends DatabaseLogic{
     
 }

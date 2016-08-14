@@ -15,71 +15,29 @@ public class DatabaseLogic {
 
     private final static String SQLITE_CONNECTION = "jdbc:sqlite:./resources/posdb.db";
     private static Connection con;
-
-    public DatabaseLogic() {
-
-    }
-
-    /**
-     * method to check that the database still exists currently just checks if
-     * it exists or not will add the ability to rebuild from the saved sql
-     * files.
-     *
-     * @throws SQLException
-     */
-    public boolean checkConnection(String table) throws SQLException {
-        boolean connected = false;
-        try {
-            Class.forName("org.sqlite.JDBC");
-            con = DriverManager.getConnection(SQLITE_CONNECTION);
-            if (con != null) {
-                Statement state = con.createStatement();
-                ResultSet res = state.executeQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='"+table+"'");
-                if (res.next()) {
-                    System.out.println("Connected to SQLite database");
-                    connected = true;
-                    con.close();
-                } else {
-                    System.err.println("Error connecting to database"
-                            + "\n table: " +table+ " doesn't exist");
-                    con.close();
-                    System.exit(1);
-                }
-            }
-        } catch (ClassNotFoundException | SQLException ex) {
-            ex.getStackTrace();
-        } finally {
-            con.close();
-        }
-        return connected;
-    }
+    private PreparedStatement pst;
+    
+    public DatabaseLogic() {}
 
     /**
      *
-     * @param table
+     * @param table name of database table
+     * @param value string values seperated using ","
      */
-    public void addToDB(String table, String column, String value) throws SQLException {
-        String preparedColumns = ""; //in SQLite does not need column names only MySQL
+    public void addToDB(String table, String value) throws SQLException {
         String preparedValues = "";
         /*
-         SQL query INSERT INTO table (column1, colum2, etc) VALUES (?,?,etc);
+         MySQL query INSERT INTO table (column1, colum2, etc) VALUES (?,?,etc);
          (columnNo1,value);
          (2,value);
+        
+        SQLite3 INSERT INTO table VALUES (value1, value2, etc);
          */
 
-        //tests the connection and ensures the table exists
-        checkConnection(table);
-        
-        //removes all whitespace and adds values to the array for column names
-        column = column.replaceAll("\\s", "");
-        String[] columnData = column.split(",");
+        //connects and tests table connection
+        connect(table);
 
-        //check to see if the column has been populated
-        if (columnData == null) {
-            System.err.println("Error, no data added to columns");
-            System.exit(1);
-        }
-
+        //regex to check if the input is in format value1, value2, value3, etc
         //removes all whitespace and adds values to the arrays for values to be added to the db
         value = value.replaceAll("\\s", "");
         String[] valueData = value.split(",");
@@ -89,31 +47,21 @@ public class DatabaseLogic {
             System.exit(1);
         }
 
-        if (columnData.length != valueData.length) {
-            System.out.println("Error values are not equal!"
-                    + "\n number of Columns: " + columnData.length
-                    + "\n number of Values: " + valueData.length);
-            System.exit(1);
-        }
-
         //craetes the two prepared Strings to be added to the database
-        for (String x : columnData) {
-            preparedColumns += x + ",";
-            preparedValues += "?,";
+        for (String x : valueData) {
+            preparedValues += "'" + x + "'" + ",";
         }
 
         //removes the last , in the strings and returns a new substring
-        preparedColumns = preparedColumns.substring(0, (preparedColumns.length() - 1));
         preparedValues = preparedValues.substring(0, (preparedValues.length() - 1));
 
-        //preparedstatement to add
+        //creates the preparedStatement for use
         String constructedStatement = "INSERT INTO " + table
-                + "(" + preparedColumns + ")" + " VALUES " + "(" + preparedValues + ")";
+                + " VALUES " + "(" + preparedValues + ")";
 
         System.out.println(constructedStatement);
-        
+
         //create a preparedStatement object
-        PreparedStatement pst;
 
         try {
             //connect to the database
@@ -122,39 +70,131 @@ public class DatabaseLogic {
 
             //add the statement to the prepared statement
             pst = con.prepareStatement(constructedStatement);
-            
-            //creates the value statements to replace the ?, ?
-            for(int i = 0; i< columnData.length; i++){
-                pst.setString(i + 1, valueData[i]);
-                System.out.println(i + 1 + valueData[i]);
-            }
-            
+
             //submits all the values
             pst.execute();
             System.out.println("Database successfully updated");
             con.close();
-            
+
         } catch (SQLException | ClassNotFoundException ex) {
+            System.err.println(ex.getMessage());
+            ex.getStackTrace();
+        } finally {
+            con.close();
+        }
+    }
+
+    /**
+     *
+     * @param table
+     * @param column
+     * @param value
+     * @return
+     */
+    public boolean queryFind(String table, String column, String value) throws SQLException {
+        //String queryUsername ="SELECT username FROM login WHERE username = ?"; 
+        String query = "SELECT " + column + " FROM " + table + " WHERE " + column + " = " +"'"+ value +"'";
+        ResultSet rs;
+        boolean exists = false;
+        String output = null;
+
+        try {
+
+            connectionLogic();
+            
+            pst = con.prepareStatement(query);
+            System.out.println(query);
+            rs = pst.executeQuery();
+            
+            if(rs.next()){
+                exists = true;
+                output = rs.toString();
+                
+                
+            }
+
+        } catch (SQLException ex) {
             System.err.println(ex.getMessage());
             ex.getStackTrace();
         }
         finally{
             con.close();
         }
-
-        
-        
-        
-        
-        
+        System.out.println(output);
+        return exists;
     }
+    
+    /**
+     * Method that opens the connection to the database base, will also close any
+     * previous connections if they are still open and checks it can access the
+     * requested table.
+     * @param table table in database you wish to access
+     */
+    public void connect(String table){
+        try{
+        connectionLogic();
+        checkConnection(table);
+        }
+        catch(SQLException ex){
+            System.err.println(ex.getMessage());
+            ex.getStackTrace();
+        }
+    }
+    
+    private static void connectionLogic(){
+        try{
+            if (con != null){
+                con.close();
+                con = null;
+            }
+            Class.forName("org.sqlite.JDBC");
+            con = DriverManager.getConnection(SQLITE_CONNECTION);
+        }
+        catch(SQLException| ClassNotFoundException ex){
+            System.err.println(ex.getMessage());
+            ex.getStackTrace();
+        }
+    }
+    
+    /**
+ * method to check that the database still exists currently just checks if it
+ * exists or not will add the ability to rebuild from the saved sql files.
+ *
+ * @throws SQLException
+ */
+private boolean checkConnection(String table) throws SQLException {
+        boolean connected = false;
+        try {
+            if (con != null) {
+                Statement state = con.createStatement();
+                ResultSet rs = state.executeQuery("SELECT name FROM sqlite_master WHERE type='table' AND name='" + table + "'");
+                if (rs.next()) {
+                    System.out.println("Connected to SQLite database");
+                    connected = true;
+                    rs = null;
+                    con.close();
+                } else {
+                    System.err.println("Error connecting to database"
+                            + "\n table: " + table + " doesn't exist");
+                    con.close();
+                    System.exit(1);
+                }
+            }
+        } catch (SQLException ex) {
+            ex.getStackTrace();
+        } finally {
+            con.close();
+        }
+        return connected;
+    }
+    
 
     //testing class
     public static void main(String[] args) throws SQLException {
 
         DatabaseLogic db = new DatabaseLogic();
-        db.checkConnection("user");
-        db.addToDB("user", "username, password, email, validated", "alex, newpass, me@home.com, false");
-
+        //db.connect("user");
+        //db.addToDB("user", "john, jboy, jboy@home.com, false");
+       System.out.println(db.queryFind("user", "email", "jboy@home.com"));
     }
 }
